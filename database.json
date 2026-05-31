@@ -1,0 +1,11 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "admin",
+      "password": "$2b$10$f2UvhWeu2N2Ix/PH.QR.wOKgQ53AyVTrbAz2lf8892obTJZw7AXDG",
+      "role": "admin"
+    }
+  ],
+  "records": []
+}

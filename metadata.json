@@ -1,0 +1,10 @@
+{
+  "name": "Geo-Attendance System",
+  "description": "An employee attendance system with geolocation validation and secure check-in/out.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

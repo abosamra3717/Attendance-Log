@@ -1,11 +1,25 @@
-<div align="center">
+# Employee Geo-Attendance System
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A full-stack, secure employee attendance system built with modern best practices.
 
-  <h1>Built with AI Studio</h2>
+## Features
+- Secure user registration and authentication (JWT).
+- Secure password hashing (Bcrypt).
+- Geolocation tracking for check-in and check-out.
+- Distance validation (must be within 50m of office).
+- Full historical attendance reporting.
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+## Frameworks and Architecture
+- **Backend**: Node.js & Express
+- **Database**: SQLite (Local embedded database)
+- **Frontend**: React, fully styled with Tailwind CSS
+- **Geolocation**: Browser `navigator.geolocation` API
+- **Distance Calc**: Haversine Formula
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Setup Instructions
+1. Navigate to the **Secrets** panel in AI Studio.
+2. Add a `JWT_SECRET` string for signing tokens (any string is fine).
+3. The system will start automatically, and the database is managed automatically via SQLite.
 
-</div>
+## How it works
+On the Dashboard, you press "Check In" or "Check Out". The app uses the Geolocation API to find your coordinates, ensures you are closely inside a 50m bounds, and creates a protected database record of the attendance event.
