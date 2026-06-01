@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
-import fs from 'fs/promises';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -37,19 +37,24 @@ function deg2rad(deg: number) {
 const DB_FILE = path.join(process.cwd(), 'database.json');
 let dbData: any = { users: [], records: [], settings: null };
 
-async function setupDatabase() {
+function setupDatabase() {
   try {
-    const data = await fs.readFile(DB_FILE, 'utf-8');
-    dbData = JSON.parse(data);
+    if (fs.existsSync(DB_FILE)) {
+      const data = fs.readFileSync(DB_FILE, 'utf-8');
+      dbData = JSON.parse(data);
+    }
     // Auto-migrate to ensure roles exist
-    dbData.users = dbData.users.map((u: any) => ({ ...u, role: u.role || (u.username.toLowerCase() === 'admin' ? 'admin' : 'employee') }));
+    dbData.users = (dbData.users || []).map((u: any) => ({
+      ...u,
+      role: u.role || (u.username.toLowerCase() === 'admin' ? 'admin' : 'employee')
+    }));
     if (!dbData.settings) {
       dbData.settings = {
         officeLatitude: parseFloat(process.env.OFFICE_LATITUDE || '30.115638'),
         officeLongitude: parseFloat(process.env.OFFICE_LONGITUDE || '31.340295'),
         maxDistanceMeters: parseInt(process.env.MAX_DISTANCE_METERS || '50', 10)
       };
-      await saveDatabase();
+      saveDatabase();
     }
   } catch (error) {
     dbData.settings = {
@@ -57,12 +62,16 @@ async function setupDatabase() {
       officeLongitude: parseFloat(process.env.OFFICE_LONGITUDE || '31.340295'),
       maxDistanceMeters: parseInt(process.env.MAX_DISTANCE_METERS || '50', 10)
     };
-    await saveDatabase();
+    saveDatabase();
   }
 }
 
-async function saveDatabase() {
-  await fs.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
+function saveDatabase() {
+  try {
+    fs.writeFileSync(DB_FILE, JSON.stringify(dbData, null, 2));
+  } catch (error) {
+    console.warn("Failed to write database file (this is expected on read-only environments like Vercel):", error);
+  }
 }
 
 function generateId(collection: any[]) {
@@ -82,13 +91,12 @@ const authenticateToken = (req: any, res: any, next: any) => {
   });
 };
 
-async function startServer() {
-  const app = express();
-  app.use(cors());
-  app.use(express.json());
+const app = express();
+app.use(cors());
+app.use(express.json());
 
-  await setupDatabase();
-  console.log('Connected to local JSON database: database.json');
+setupDatabase();
+console.log('Connected to local JSON database: database.json');
 
   // --- API ROUTES ---
 
@@ -346,11 +354,20 @@ async function startServer() {
 
   // --- VITE MIDDLEWARE ---
   if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
+    let viteInstance: any;
+    const vitePromise = createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
+    }).then(instance => {
+      viteInstance = instance;
     });
-    app.use(vite.middlewares);
+
+    app.use(async (req, res, next) => {
+      if (!viteInstance) {
+        await vitePromise;
+      }
+      viteInstance.middlewares(req, res, next);
+    });
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
@@ -359,9 +376,10 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}
+  if (!process.env.VERCEL) {
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  }
 
-startServer();
+  export default app;
