@@ -5,7 +5,19 @@
       "username": "admin",
       "password": "$2b$10$f2UvhWeu2N2Ix/PH.QR.wOKgQ53AyVTrbAz2lf8892obTJZw7AXDG",
       "role": "admin"
+    },
+    {
+      "id": 2,
+      "username": "testu",
+      "password": "$2b$10$S4.ZGI/u6Yb6gcM2nuy2FeIaQkvRchr1ZeptCKdldaWbADlrOO7w6",
+      "role": "employee",
+      "fullName": "Test User"
     }
   ],
-  "records": []
+  "records": [],
+  "settings": {
+    "officeLatitude": 30.115638,
+    "officeLongitude": 31.340295,
+    "maxDistanceMeters": 50
+  }
 }

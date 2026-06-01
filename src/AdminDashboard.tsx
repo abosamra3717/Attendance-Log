@@ -64,9 +64,9 @@ export default function AdminDashboard({ token, username, onLogout }: AdminDashb
       
       const dayData = grouped[user][dateKey];
       
-      if (record.type === 'checkin') {
+      if (record.type === 'checkin' || record.type === 'checkin_overtime') {
         dayData.lastCheckin = new Date(record.timestamp);
-      } else if (record.type === 'checkout' && dayData.lastCheckin) {
+      } else if ((record.type === 'checkout' || record.type === 'checkout_overtime') && dayData.lastCheckin) {
         const checkOutTime = new Date(record.timestamp);
         dayData.totalMs += (checkOutTime.getTime() - dayData.lastCheckin.getTime());
         dayData.lastCheckin = null; // reset
@@ -380,9 +380,9 @@ export default function AdminDashboard({ token, username, onLogout }: AdminDashb
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium capitalize ${
-                            record.type === 'checkin' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            record.type.startsWith('checkin') ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                           }`}>
-                            {record.type.replace('-', ' ')}
+                            {record.type.replace('_', ' ')}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

@@ -103,7 +103,7 @@ async function startServer() {
       }
 
       const normalizedUsername = username.trim().toLowerCase();
-      const existingUser = dbData.users.find((u: any) => u.username.trim().toLowerCase() === normalizedUsername);
+      const existingUser = dbData.users.find((u: any) => u.username?.trim().toLowerCase() === normalizedUsername);
       if (existingUser) return res.status(400).json({ error: 'Username already exists' });
 
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -124,7 +124,7 @@ async function startServer() {
       if (!username || !password) return res.status(401).json({ error: 'Invalid username or password' });
 
       const normalizedUsername = username.trim().toLowerCase();
-      const user = dbData.users.find((u: any) => u.username.trim().toLowerCase() === normalizedUsername);
+      const user = dbData.users.find((u: any) => u.username?.trim().toLowerCase() === normalizedUsername);
       if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
       const validPassword = await bcrypt.compare(password, user.password);
@@ -149,16 +149,34 @@ async function startServer() {
         return res.status(400).json({ error: 'Missing attendance data' });
       }
 
-      if (type !== 'checkin' && type !== 'checkout') {
+      if (type !== 'checkin' && type !== 'checkout' && type !== 'checkin_overtime' && type !== 'checkout_overtime') {
         return res.status(400).json({ error: 'Invalid record type' });
       }
 
       const settings = dbData.settings;
       const distance = getDistanceFromLatLonInM(settings.officeLatitude, settings.officeLongitude, latitude, longitude);
-      if (distance > settings.maxDistanceMeters) {
+      const isOvertimeType = type === 'checkin_overtime' || type === 'checkout_overtime';
+
+      if (!isOvertimeType && distance > settings.maxDistanceMeters) {
         return res.status(403).json({ 
           error: `You are too far from the office. Distance is ${Math.round(distance)}m. Must be within ${settings.maxDistanceMeters}m.` 
         });
+      }
+
+      // Enforce checkin/checkout sequence
+      const userRecords = dbData.records
+        .filter((r: any) => r.userId === req.user.id)
+        .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      const lastRecord = userRecords[0];
+
+      if (type.startsWith('checkin')) {
+        if (lastRecord && lastRecord.type.startsWith('checkin')) {
+          return res.status(400).json({ error: 'You are already checked in. Please check out first.' });
+        }
+      } else if (type.startsWith('checkout')) {
+        if (!lastRecord || lastRecord.type.startsWith('checkout')) {
+          return res.status(400).json({ error: 'You are not checked in. Please check in first.' });
+        }
       }
 
       dbData.records.push({
@@ -171,7 +189,7 @@ async function startServer() {
       });
       await saveDatabase();
 
-      res.status(201).json({ message: `Successfully checked ${type === 'checkin' ? 'in' : 'out'}` });
+      res.status(201).json({ message: `Successfully checked ${type.startsWith('checkin') ? 'in' : 'out'}` });
     } catch (error) {
       res.status(500).json({ error: 'Server error recording attendance' });
     }

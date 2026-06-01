@@ -15,6 +15,11 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
 
+  const isCheckedIn = useMemo(() => {
+    if (records.length === 0) return false;
+    return records[0].type.startsWith('checkin');
+  }, [records]);
+
   const fetchConfig = async () => {
     try {
       const res = await fetch('/api/config');
@@ -48,25 +53,28 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
     let reg = 0;
     let ot = 0;
     const sortedDesc = [...records].reverse();
-    let pendingCheckIn: Date | null = null;
+    let pendingCheckIn: { date: Date, isOvertime: boolean } | null = null;
     
     sortedDesc.forEach(record => {
-      if (record.type === 'checkin') {
-        pendingCheckIn = new Date(record.timestamp);
-      } else if (record.type === 'checkout' && pendingCheckIn) {
+      if (record.type === 'checkin' || record.type === 'checkin_overtime') {
+        pendingCheckIn = { date: new Date(record.timestamp), isOvertime: record.type === 'checkin_overtime' };
+      } else if ((record.type === 'checkout' || record.type === 'checkout_overtime') && pendingCheckIn) {
         const checkOut = new Date(record.timestamp);
-        const day = pendingCheckIn.getDay(); 
-        const checkInTime = pendingCheckIn.getTime();
+        const day = pendingCheckIn.date.getDay(); 
+        const checkInTime = pendingCheckIn.date.getTime();
         const checkOutTime = checkOut.getTime();
         
-        if (day === 5 || day === 6) { 
+        if (pendingCheckIn.isOvertime || record.type === 'checkout_overtime') {
+          // Explicit overtime -> all overtime
+          ot += (checkOutTime - checkInTime);
+        } else if (day === 5 || day === 6) { 
           // Friday or Saturday -> All overtime
           ot += (checkOutTime - checkInTime);
         } else { 
           // Sun-Thu
-          const shiftStart = new Date(pendingCheckIn);
+          const shiftStart = new Date(pendingCheckIn.date);
           shiftStart.setHours(9, 0, 0, 0);
-          const shiftEnd = new Date(pendingCheckIn);
+          const shiftEnd = new Date(pendingCheckIn.date);
           shiftEnd.setHours(17, 0, 0, 0);
           
           const overlapStart = Math.max(checkInTime, shiftStart.getTime());
@@ -94,7 +102,7 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
     return `${hrs}h ${mins}m`;
   };
 
-  const handleAttendance = (type: 'checkin' | 'checkout') => {
+  const handleAttendance = (type: string) => {
     if (!config) return;
     setLoading(true);
     setStatusMsg({ text: 'Locating...', type: 'info' });
@@ -115,7 +123,9 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           longitude
         );
 
-        if (distance > config.MAX_DISTANCE_METERS) {
+        const isOvertimeType = type === 'checkin_overtime' || type === 'checkout_overtime';
+
+        if (!isOvertimeType && distance > config.MAX_DISTANCE_METERS) {
           setStatusMsg({ 
             text: `Validation failed: You are ${Math.round(distance)}m away. Must be within ${config.MAX_DISTANCE_METERS}m of the office.`, 
             type: 'error' 
@@ -248,24 +258,59 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           <div className="bg-white overflow-hidden shadow sm:rounded-lg border border-gray-200 text-center p-8">
             <MapPin className="w-12 h-12 text-blue-500 mx-auto mb-4" />
             <h2 className="text-2xl font-semibold mb-2">Record Attendance</h2>
-            <p className="text-gray-500 text-sm mb-8">
+
+            <div className="mb-4">
+              <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+                isCheckedIn 
+                  ? 'bg-green-100 text-green-800 border border-green-200' 
+                  : 'bg-gray-100 text-gray-800 border border-gray-200'
+              }`}>
+                <span className={`w-2.5 h-2.5 rounded-full mr-2 ${isCheckedIn ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+                {isCheckedIn ? 'Currently Checked In' : 'Currently Checked Out'}
+              </span>
+            </div>
+
+            <p className="text-gray-500 text-sm mb-6">
               Ensure you are physically present at the office (within {config?.MAX_DISTANCE_METERS || 50}m). Location access must be enabled.
             </p>
-            <div className="flex flex-col sm:flex-row justify-center gap-4">
+            <div className="flex flex-col sm:flex-row justify-center gap-4 mt-6">
               <button
                 onClick={() => handleAttendance('checkin')}
-                disabled={loading}
-                className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:opacity-50"
+                disabled={loading || isCheckedIn}
+                className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Check In
               </button>
               <button
                 onClick={() => handleAttendance('checkout')}
-                disabled={loading}
-                className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-50"
+                disabled={loading || !isCheckedIn}
+                className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Check Out
               </button>
+            </div>
+            
+            <div className="mt-8 border-t border-gray-100 pt-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Overtime</h3>
+              <p className="text-gray-500 text-sm mb-4">
+                Working outside regular hours? Location validation is bypassed to allow remote overtime work.
+              </p>
+              <div className="flex flex-col sm:flex-row justify-center gap-4">
+                <button
+                  onClick={() => handleAttendance('checkin_overtime')}
+                  disabled={loading || isCheckedIn}
+                  className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Overtime Check In
+                </button>
+                <button
+                  onClick={() => handleAttendance('checkout_overtime')}
+                  disabled={loading || !isCheckedIn}
+                  className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Overtime Check Out
+                </button>
+              </div>
             </div>
           </div>
 
@@ -293,8 +338,8 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
                     <li key={record._id} className="p-4 sm:px-6 hover:bg-gray-50 transition-colors">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center">
-                          <div className={`w-2 h-2 rounded-full mr-3 ${record.type === 'checkin' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                          <p className="text-sm font-medium text-gray-900 capitalize">{record.type.replace('-', ' ')}</p>
+                          <div className={`w-2 h-2 rounded-full mr-3 ${record.type.startsWith('checkin') ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          <p className="text-sm font-medium text-gray-900 capitalize">{record.type.replace('_', ' ')}</p>
                         </div>
                         <div className="text-sm text-gray-500">
                           {new Date(record.timestamp).toLocaleString()}
