@@ -2,6 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Config, AttendanceRecord } from './types';
 import { getDistanceFromLatLonInM } from './lib/geo';
 import { LogOut, MapPin, CheckCircle, AlertTriangle, Clock, Map, TrendingUp } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import LanguageSwitcher from './components/LanguageSwitcher';
 
 interface DashboardProps {
   token: string;
@@ -10,14 +12,19 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ token, username, onLogout, hideNav = false }: DashboardProps & { hideNav?: boolean }) {
+  const { t } = useTranslation();
   const [config, setConfig] = useState<Config | null>(null);
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
 
-  const isCheckedIn = useMemo(() => {
-    if (records.length === 0) return false;
-    return records[0].type.startsWith('checkin');
+  const { isCheckedIn, lastRecordType } = useMemo(() => {
+    if (records.length === 0) return { isCheckedIn: false, lastRecordType: null };
+    const lastType = records[0].type;
+    return {
+      isCheckedIn: lastType === 'checkin' || lastType === 'checkin_overtime' || lastType === 'wfh-checkin',
+      lastRecordType: lastType
+    };
   }, [records]);
 
   const fetchConfig = async () => {
@@ -53,23 +60,27 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
     let reg = 0;
     let ot = 0;
     const sortedDesc = [...records].reverse();
-    let pendingCheckIn: { date: Date, isOvertime: boolean } | null = null;
+    let pendingCheckIn: { date: Date, isOvertime: boolean, isWfh: boolean } | null = null;
     
     sortedDesc.forEach(record => {
-      if (record.type === 'checkin' || record.type === 'checkin_overtime') {
-        pendingCheckIn = { date: new Date(record.timestamp), isOvertime: record.type === 'checkin_overtime' };
-      } else if ((record.type === 'checkout' || record.type === 'checkout_overtime') && pendingCheckIn) {
+      if (record.type === 'checkin' || record.type === 'checkin_overtime' || record.type === 'wfh-checkin') {
+        pendingCheckIn = { date: new Date(record.timestamp), isOvertime: record.type === 'checkin_overtime', isWfh: record.type === 'wfh-checkin' };
+      } else if ((record.type === 'checkout' || record.type === 'checkout_overtime' || record.type === 'wfh-checkout') && pendingCheckIn) {
         const checkOut = new Date(record.timestamp);
         const day = pendingCheckIn.date.getDay(); 
         const checkInTime = pendingCheckIn.date.getTime();
         const checkOutTime = checkOut.getTime();
+        const total = checkOutTime - checkInTime;
         
-        if (pendingCheckIn.isOvertime || record.type === 'checkout_overtime') {
+        if (pendingCheckIn.isWfh || record.type === 'wfh-checkout') {
+          // WFH is NOT counted as overtime
+          reg += total;
+        } else if (pendingCheckIn.isOvertime || record.type === 'checkout_overtime') {
           // Explicit overtime -> all overtime
-          ot += (checkOutTime - checkInTime);
+          ot += total;
         } else if (day === 5 || day === 6) { 
           // Friday or Saturday -> All overtime
-          ot += (checkOutTime - checkInTime);
+          ot += total;
         } else { 
           // Sun-Thu
           const shiftStart = new Date(pendingCheckIn.date);
@@ -84,7 +95,6 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           if (overlapStart < overlapEnd) {
             regular = overlapEnd - overlapStart;
           }
-          const total = checkOutTime - checkInTime;
           reg += regular;
           ot += (total - regular);
         }
@@ -124,8 +134,9 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
         );
 
         const isOvertimeType = type === 'checkin_overtime' || type === 'checkout_overtime';
+        const isWfhType = type === 'wfh-checkin' || type === 'wfh-checkout';
 
-        if (!isOvertimeType && distance > config.MAX_DISTANCE_METERS) {
+        if (!isOvertimeType && !isWfhType && distance > config.MAX_DISTANCE_METERS) {
           setStatusMsg({ 
             text: `Validation failed: You are ${Math.round(distance)}m away. Must be within ${config.MAX_DISTANCE_METERS}m of the office.`, 
             type: 'error' 
@@ -176,16 +187,17 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between h-16">
               <div className="flex items-center">
-                <MapPin className="text-blue-600 w-6 h-6 mr-2" />
+                <MapPin className="text-blue-600 w-6 h-6 ltr:mr-2 rtl:ml-2" />
                 <h1 className="text-xl font-bold text-gray-900">Geo-Attendance</h1>
               </div>
               <div className="flex items-center space-x-4">
-                <span className="text-sm text-gray-500">Welcome, <strong>{username}</strong></span>
+                <span className="text-sm text-gray-500">{t('Welcome', { defaultValue: 'Welcome'})}, <strong>{username}</strong></span>
+                <LanguageSwitcher />
                 <button
                   onClick={onLogout}
-                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-gray-600 bg-gray-100 hover:bg-gray-200"
+                  className="inline-flex items-center px-3 py-1.5 border border-transparent text-sm font-medium rounded-md text-gray-600 bg-gray-100 hover:bg-gray-200 ml-4 rtl:mr-4"
                 >
-                  <LogOut className="w-4 h-4 mr-1" /> Logout
+                  <LogOut className="w-4 h-4 ltr:mr-1 rtl:ml-1" /> {t('Logout')}
                 </button>
               </div>
             </div>
@@ -196,8 +208,8 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
       <main className={hideNav ? "py-8" : "max-w-7xl mx-auto py-10 px-4 sm:px-6 lg:px-8"}>
         {!hideNav && (
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-gray-900">Welcome, {username}!</h2>
-            <p className="text-gray-600 mt-1">Here is your attendance dashboard.</p>
+            <h2 className="text-2xl font-bold text-gray-900">{t('Welcome', { defaultValue: 'Welcome'})}, {username}!</h2>
+            <p className="text-gray-600 mt-1">{t('Here is your attendance dashboard.', { defaultValue: 'Here is your attendance dashboard.'})}</p>
           </div>
         )}
 
@@ -206,37 +218,37 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-sm font-medium text-gray-500">Regular Hours</p>
+                <p className="text-sm font-medium text-gray-500">{t('Regular Hours', { defaultValue: 'Regular Hours' })}</p>
                 <h3 className="text-2xl font-bold text-gray-900 mt-1">{formatDuration(regularMs)}</h3>
               </div>
               <div className="bg-blue-50 p-3 rounded-full">
                 <Clock className="w-6 h-6 text-blue-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-4">(9:00 AM - 5:00 PM, Sun-Thu)</p>
+            <p className="text-xs text-gray-400 mt-4">{t('(9:00 AM - 5:00 PM, Sun-Thu)', { defaultValue: '(9:00 AM - 5:00 PM, Sun-Thu)' })}</p>
           </div>
           
           <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-sm font-medium text-gray-500">Overtime</p>
+                <p className="text-sm font-medium text-gray-500">{t('Overtime', { defaultValue: 'Overtime' })}</p>
                 <h3 className="text-2xl font-bold text-gray-900 mt-1">{formatDuration(overtimeMs)}</h3>
               </div>
               <div className="bg-green-50 p-3 rounded-full">
                 <TrendingUp className="w-6 h-6 text-green-600" />
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-4">(Outside regular hours & Weekends)</p>
+            <p className="text-xs text-gray-400 mt-4">{t('(Outside regular hours & Weekends)', { defaultValue: '(Outside regular hours & Weekends)' })}</p>
           </div>
 
           <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200 sm:col-span-2 lg:col-span-1">
             <div className="flex justify-between items-center">
               <div>
-                <p className="text-sm font-medium text-gray-500">Total Hours</p>
+                <p className="text-sm font-medium text-gray-500">{t('Total Hours', { defaultValue: 'Total Hours' })}</p>
                 <h3 className="text-2xl font-bold text-blue-700 mt-1">{formatDuration(regularMs + overtimeMs)}</h3>
               </div>
             </div>
-            <p className="text-xs text-gray-400 mt-4">Total duration worked</p>
+            <p className="text-xs text-gray-400 mt-4">{t('Total duration worked', { defaultValue: 'Total duration worked' })}</p>
           </div>
         </div>
 
@@ -257,7 +269,7 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           {/* Action Panel */}
           <div className="bg-white overflow-hidden shadow sm:rounded-lg border border-gray-200 text-center p-8">
             <MapPin className="w-12 h-12 text-blue-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-semibold mb-2">Record Attendance</h2>
+            <h2 className="text-2xl font-semibold mb-2">{t('Record Attendance', { defaultValue: 'Record Attendance' })}</h2>
 
             <div className="mb-4">
               <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
@@ -265,13 +277,13 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
                   ? 'bg-green-100 text-green-800 border border-green-200' 
                   : 'bg-gray-100 text-gray-800 border border-gray-200'
               }`}>
-                <span className={`w-2.5 h-2.5 rounded-full mr-2 ${isCheckedIn ? 'bg-green-500' : 'bg-gray-400'}`}></span>
-                {isCheckedIn ? 'Currently Checked In' : 'Currently Checked Out'}
+                <span className={`w-2.5 h-2.5 rounded-full ltr:mr-2 rtl:ml-2 ${isCheckedIn ? 'bg-green-500' : 'bg-gray-400'}`}></span>
+                {isCheckedIn ? t('Currently Checked In', { defaultValue: 'Currently Checked In' }) : t('Currently Checked Out', { defaultValue: 'Currently Checked Out' })}
               </span>
             </div>
 
             <p className="text-gray-500 text-sm mb-6">
-              Ensure you are physically present at the office (within {config?.MAX_DISTANCE_METERS || 50}m). Location access must be enabled.
+              {t('Ensure you are physically present at the office', { defaultValue: 'Ensure you are physically present at the office' })} {config?.MAX_DISTANCE_METERS || 50}m.
             </p>
             <div className="flex flex-col sm:flex-row justify-center gap-4 mt-6">
               <button
@@ -279,21 +291,44 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
                 disabled={loading || isCheckedIn}
                 className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Check In
+                {t('Check In')}
               </button>
               <button
                 onClick={() => handleAttendance('checkout')}
-                disabled={loading || !isCheckedIn}
+                disabled={loading || !isCheckedIn || lastRecordType !== 'checkin'}
                 className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-red-700 bg-red-100 hover:bg-red-200 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Check Out
+                {t('Check Out')}
               </button>
             </div>
             
             <div className="mt-8 border-t border-gray-100 pt-6">
-              <h3 className="text-lg font-medium text-gray-900 mb-2">Overtime</h3>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">{t('Work From Home', { defaultValue: 'Work From Home' })}</h3>
               <p className="text-gray-500 text-sm mb-4">
-                Working outside regular hours? Location validation is bypassed to allow remote overtime work.
+                {t('Working from home?', { defaultValue: 'Working from home? Location validation is bypassed and these hours count as regular time.' })}
+              </p>
+              <div className="flex flex-col sm:flex-row justify-center gap-4">
+                <button
+                  onClick={() => handleAttendance('wfh-checkin')}
+                  disabled={loading || isCheckedIn}
+                  className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {t('WFH Check In')}
+                </button>
+                <button
+                  onClick={() => handleAttendance('wfh-checkout')}
+                  disabled={loading || !isCheckedIn || lastRecordType !== 'wfh-checkin'}
+                  className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {t('WFH Check Out')}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-8 border-t border-gray-100 pt-6">
+              <h3 className="text-lg font-medium text-gray-900 mb-2">{t('Overtime', { defaultValue: 'Overtime' })}</h3>
+              <p className="text-gray-500 text-sm mb-4">
+                {t('Working outside regular hours?', { defaultValue: 'Working outside regular hours? Location validation is bypassed to allow remote overtime work.' })}
               </p>
               <div className="flex flex-col sm:flex-row justify-center gap-4">
                 <button
@@ -301,14 +336,14 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
                   disabled={loading || isCheckedIn}
                   className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Overtime Check In
+                  {t('Overtime Check In', { defaultValue: 'Overtime Check In' })}
                 </button>
                 <button
                   onClick={() => handleAttendance('checkout_overtime')}
-                  disabled={loading || !isCheckedIn}
+                  disabled={loading || !isCheckedIn || lastRecordType !== 'checkin_overtime'}
                   className="inline-flex justify-center items-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-blue-700 bg-blue-100 hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Overtime Check Out
+                  {t('Overtime Check Out', { defaultValue: 'Overtime Check Out' })}
                 </button>
               </div>
             </div>
@@ -318,19 +353,19 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
           <div className="bg-white overflow-hidden shadow sm:rounded-lg border border-gray-200 flex flex-col">
             <div className="px-4 py-5 sm:px-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-lg leading-6 font-medium text-gray-900 flex items-center">
-                <Clock className="w-5 h-5 mr-2 text-gray-500" /> Recent Activity
+                <Clock className="w-5 h-5 ltr:mr-2 rtl:ml-2 text-gray-500" /> {t('Recent Activity', { defaultValue: 'Recent Activity' })}
               </h3>
               <button 
                 onClick={fetchRecords} 
                 className="text-sm text-blue-600 hover:text-blue-800 font-medium"
               >
-                Refresh
+                {t('Refresh', { defaultValue: 'Refresh' })}
               </button>
             </div>
             <div className="flex-1 overflow-y-auto max-h-96">
               {records.length === 0 ? (
                 <div className="p-6 text-center text-gray-500 text-sm">
-                  No attendance records found.
+                  {t('No records found')}
                 </div>
               ) : (
                 <ul className="divide-y divide-gray-200">
@@ -338,15 +373,15 @@ export default function Dashboard({ token, username, onLogout, hideNav = false }
                     <li key={record._id} className="p-4 sm:px-6 hover:bg-gray-50 transition-colors">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center">
-                          <div className={`w-2 h-2 rounded-full mr-3 ${record.type.startsWith('checkin') ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                          <p className="text-sm font-medium text-gray-900 capitalize">{record.type.replace('_', ' ')}</p>
+                          <div className={`w-2 h-2 rounded-full ltr:mr-3 rtl:ml-3 ${(record.type === 'checkin' || record.type === 'checkin_overtime' || record.type === 'wfh-checkin') ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                          <p className="text-sm font-medium text-gray-900 capitalize">{t(record.type.replace('_', ' '), { defaultValue: record.type.replace('_', ' ') })}</p>
                         </div>
                         <div className="text-sm text-gray-500">
                           {new Date(record.timestamp).toLocaleString()}
                         </div>
                       </div>
-                      <div className="mt-2 text-xs text-gray-400 pl-5">
-                        Coords: {record.latitude.toFixed(5)}, {record.longitude.toFixed(5)}
+                      <div className="mt-2 text-xs text-gray-400 ltr:pl-5 rtl:pr-5">
+                        {t('Location')}: {record.latitude.toFixed(5)}, {record.longitude.toFixed(5)}
                       </div>
                     </li>
                   ))}

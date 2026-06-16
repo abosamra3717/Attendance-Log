@@ -100,28 +100,99 @@ console.log('Connected to local JSON database: database.json');
 
   // --- API ROUTES ---
 
+  // In-memory OTP storage for reset password
+  const resetOtps = new Map<string, { otp: string, timestamp: number }>();
+
   // Auth: Register
   app.post('/api/auth/register', async (req, res) => {
     try {
-      const { username, password, fullName } = req.body;
-      if (!username || !password || !fullName) return res.status(400).json({ error: 'Missing credentials' });
+      const { username, password, fullName, email, phone } = req.body;
+      if (!username || !password || !fullName || !email || !phone) return res.status(400).json({ error: 'Missing credentials' });
       
       if (password.length < 8 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password)) {
         return res.status(400).json({ error: 'Password must be at least 8 characters long, and contain at least one uppercase letter, one lowercase letter, and one number.' });
       }
 
       const normalizedUsername = username.trim().toLowerCase();
-      const existingUser = dbData.users.find((u: any) => u.username?.trim().toLowerCase() === normalizedUsername);
-      if (existingUser) return res.status(400).json({ error: 'Username already exists' });
+      const existingUser = dbData.users.find((u: any) => u.username?.trim().toLowerCase() === normalizedUsername || u.email === email || u.phone === phone);
+      if (existingUser) return res.status(400).json({ error: 'Username, email, or phone already exists' });
 
       const hashedPassword = await bcrypt.hash(password, 10);
       const role = normalizedUsername === 'admin' ? 'admin' : 'employee';
-      dbData.users.push({ id: generateId(dbData.users), username: username.trim(), password: hashedPassword, role, fullName: fullName.trim() });
+      dbData.users.push({ 
+        id: generateId(dbData.users), 
+        username: username.trim(), 
+        password: hashedPassword, 
+        role, 
+        fullName: fullName.trim(),
+        email: email.trim(),
+        phone: phone.trim()
+      });
       await saveDatabase();
 
       res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
       res.status(500).json({ error: 'Server error during registration' });
+    }
+  });
+
+  // Auth: Reset Password - Request OTP
+  app.post('/api/auth/reset-password/request', async (req, res) => {
+    try {
+      const { contact } = req.body;
+      if (!contact) return res.status(400).json({ error: 'Please provide email or phone number' });
+
+      // Find user by email or phone
+      const user = dbData.users.find((u: any) => u.email === contact || u.phone === contact);
+      if (!user) return res.status(404).json({ error: 'No user found with that email or phone' });
+
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      resetOtps.set(contact, { otp, timestamp: Date.now() });
+
+      // In a real application, you would send the OTP via Twilio (WhatsApp/SMS) or Nodemailer (Email)
+      console.log(`[SIMULATION] Sending OTP ${otp} to ${contact}`);
+
+      res.json({ message: 'OTP sent successfully. Check your email or message.' });
+    } catch (error) {
+      res.status(500).json({ error: 'Server error generating OTP' });
+    }
+  });
+
+  // Auth: Reset Password - Verify and Update
+  app.post('/api/auth/reset-password/verify', async (req, res) => {
+    try {
+      const { contact, otp, newPassword } = req.body;
+      if (!contact || !otp || !newPassword) return res.status(400).json({ error: 'Missing parameters' });
+
+      const storedOtpInfo = resetOtps.get(contact);
+      if (!storedOtpInfo) return res.status(400).json({ error: 'Invalid or expired OTP' });
+      
+      // Expire after 10 minutes
+      if (Date.now() - storedOtpInfo.timestamp > 10 * 60 * 1000) {
+        resetOtps.delete(contact);
+        return res.status(400).json({ error: 'OTP has expired' });
+      }
+
+      if (storedOtpInfo.otp !== otp) return res.status(400).json({ error: 'Incorrect OTP' });
+
+      const userIndex = dbData.users.findIndex((u: any) => u.email === contact || u.phone === contact);
+      if (userIndex === -1) return res.status(404).json({ error: 'User not found' });
+
+      if (newPassword.length < 8 || !/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/\d/.test(newPassword)) {
+        return res.status(400).json({ error: 'Password does not meet requirements' });
+      }
+
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      dbData.users[userIndex].password = hashedPassword;
+      await saveDatabase();
+
+      // Clean up OTP
+      resetOtps.delete(contact);
+
+      res.json({ message: 'Password updated successfully' });
+    } catch (error) {
+      res.status(500).json({ error: 'Server error resetting password' });
     }
   });
 
@@ -157,15 +228,16 @@ console.log('Connected to local JSON database: database.json');
         return res.status(400).json({ error: 'Missing attendance data' });
       }
 
-      if (type !== 'checkin' && type !== 'checkout' && type !== 'checkin_overtime' && type !== 'checkout_overtime') {
+      if (type !== 'checkin' && type !== 'checkout' && type !== 'checkin_overtime' && type !== 'checkout_overtime' && type !== 'wfh-checkin' && type !== 'wfh-checkout') {
         return res.status(400).json({ error: 'Invalid record type' });
       }
 
       const settings = dbData.settings;
       const distance = getDistanceFromLatLonInM(settings.officeLatitude, settings.officeLongitude, latitude, longitude);
       const isOvertimeType = type === 'checkin_overtime' || type === 'checkout_overtime';
+      const isWfhType = type === 'wfh-checkin' || type === 'wfh-checkout';
 
-      if (!isOvertimeType && distance > settings.maxDistanceMeters) {
+      if (!isOvertimeType && !isWfhType && distance > settings.maxDistanceMeters) {
         return res.status(403).json({ 
           error: `You are too far from the office. Distance is ${Math.round(distance)}m. Must be within ${settings.maxDistanceMeters}m.` 
         });
@@ -177,12 +249,15 @@ console.log('Connected to local JSON database: database.json');
         .sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
       const lastRecord = userRecords[0];
 
-      if (type.startsWith('checkin')) {
-        if (lastRecord && lastRecord.type.startsWith('checkin')) {
+      const isCheckinClass = type === 'checkin' || type === 'checkin_overtime' || type === 'wfh-checkin';
+      const isCheckoutClass = type === 'checkout' || type === 'checkout_overtime' || type === 'wfh-checkout';
+
+      if (isCheckinClass) {
+        if (lastRecord && (lastRecord.type === 'checkin' || lastRecord.type === 'checkin_overtime' || lastRecord.type === 'wfh-checkin')) {
           return res.status(400).json({ error: 'You are already checked in. Please check out first.' });
         }
-      } else if (type.startsWith('checkout')) {
-        if (!lastRecord || lastRecord.type.startsWith('checkout')) {
+      } else if (isCheckoutClass) {
+        if (!lastRecord || (lastRecord.type === 'checkout' || lastRecord.type === 'checkout_overtime' || lastRecord.type === 'wfh-checkout')) {
           return res.status(400).json({ error: 'You are not checked in. Please check in first.' });
         }
       }
@@ -197,7 +272,7 @@ console.log('Connected to local JSON database: database.json');
       });
       await saveDatabase();
 
-      res.status(201).json({ message: `Successfully checked ${type.startsWith('checkin') ? 'in' : 'out'}` });
+      res.status(201).json({ message: `Successfully checked ${isCheckinClass ? 'in' : 'out'}` });
     } catch (error) {
       res.status(500).json({ error: 'Server error recording attendance' });
     }
@@ -249,7 +324,8 @@ console.log('Connected to local JSON database: database.json');
           ...r,
           _id: r.id.toString(),
           username: user ? user.username : 'Unknown',
-          fullName: user ? user.fullName || user.username : 'Unknown'
+          fullName: user ? user.fullName || user.username : 'Unknown',
+          salary: user ? user.salary : undefined
         };
       }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
@@ -264,7 +340,7 @@ console.log('Connected to local JSON database: database.json');
   app.get('/api/admin/users', authenticateToken, async (req: any, res: any) => {
     try {
       if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
-      const users = dbData.users.map((u: any) => ({ id: u.id, username: u.username, role: u.role || 'employee', fullName: u.fullName }));
+      const users = dbData.users.map((u: any) => ({ id: u.id, username: u.username, role: u.role || 'employee', fullName: u.fullName, salary: u.salary }));
       res.json(users);
     } catch (error) {
       res.status(500).json({ error: 'Server error fetching users' });
@@ -276,13 +352,14 @@ console.log('Connected to local JSON database: database.json');
     try {
       if (req.user.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
       const id = parseInt(req.params.id, 10);
-      const { username, role, fullName } = req.body;
+      const { username, role, fullName, salary } = req.body;
       const userIndex = dbData.users.findIndex((u: any) => u.id === id);
       if (userIndex === -1) return res.status(404).json({ error: 'User not found' });
       
       if (username) dbData.users[userIndex].username = username;
       if (role) dbData.users[userIndex].role = role;
       if (fullName !== undefined) dbData.users[userIndex].fullName = fullName;
+      if (salary !== undefined) dbData.users[userIndex].salary = salary === null ? undefined : salary;
       
       await saveDatabase();
       res.json({ message: 'User updated successfully' });
@@ -369,7 +446,7 @@ console.log('Connected to local JSON database: database.json');
       viteInstance.middlewares(req, res, next);
     });
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), 'dist', 'client');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));

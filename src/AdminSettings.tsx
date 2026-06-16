@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Settings as SettingsIcon, Save, MapPin } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 interface AdminSettingsProps {
   token: string;
 }
 
 export default function AdminSettings({ token }: AdminSettingsProps) {
+  const { t } = useTranslation();
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [maxDistance, setMaxDistance] = useState('');
@@ -28,10 +30,10 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
         setLongitude(data.officeLongitude.toString());
         setMaxDistance(data.maxDistanceMeters.toString());
       } else {
-        setStatus({ text: 'Failed to load settings', type: 'error' });
+        setStatus({ text: t('Failed to load settings', { defaultValue: 'Failed to load settings' }), type: 'error' });
       }
     } catch (error) {
-      setStatus({ text: 'Error loading settings', type: 'error' });
+      setStatus({ text: t('Error loading settings', { defaultValue: 'Error loading settings' }), type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -40,7 +42,7 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!latitude || !longitude || !maxDistance) {
-      setStatus({ text: 'All fields are required', type: 'error' });
+      setStatus({ text: t('All fields are required', { defaultValue: 'All fields are required' }), type: 'error' });
       return;
     }
 
@@ -59,26 +61,26 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
       });
 
       if (res.ok) {
-        setStatus({ text: 'Settings updated successfully', type: 'success' });
+        setStatus({ text: t('Settings updated successfully', { defaultValue: 'Settings updated successfully' }), type: 'success' });
         setTimeout(() => setStatus({ text: '', type: '' }), 3000);
       } else {
         const err = await res.json();
-        setStatus({ text: err.error || 'Failed to update settings', type: 'error' });
+        setStatus({ text: err.error || t('Failed to update settings', { defaultValue: 'Failed to update settings' }), type: 'error' });
       }
     } catch (error) {
-      setStatus({ text: 'Error updating settings', type: 'error' });
+      setStatus({ text: t('Error updating settings', { defaultValue: 'Error updating settings' }), type: 'error' });
     }
   };
 
   if (loading) {
-    return <div className="p-8 text-center text-gray-500">Loading settings...</div>;
+    return <div className="p-8 text-center text-gray-500">{t('Loading settings...')}</div>;
   }
 
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
       <div className="flex items-center mb-6">
-        <SettingsIcon className="w-5 h-5 text-gray-500 mr-2" />
-        <h2 className="text-xl font-bold text-gray-900">System Settings</h2>
+        <SettingsIcon className="w-5 h-5 text-gray-500 ltr:mr-2 rtl:ml-2" />
+        <h2 className="text-xl font-bold text-gray-900">{t('System Settings')}</h2>
       </div>
 
       {status.text && (
@@ -92,16 +94,16 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
       <form onSubmit={handleSave} className="space-y-6 max-w-lg">
         <div>
           <h3 className="text-lg font-medium text-gray-900 mb-4 flex items-center">
-            <MapPin className="w-4 h-4 mr-2 text-blue-500" />
-            Office Location
+            <MapPin className="w-4 h-4 ltr:mr-2 rtl:ml-2 text-blue-500" />
+            {t('Office Location', { defaultValue: 'Office Location'})}
           </h3>
           <p className="text-sm text-gray-500 mb-4">
-            Set the central coordinates for checking attendance, and the maximum allowed distance for employees to check in.
+            {t('Set the central coordinates for checking attendance', { defaultValue: 'Set the central coordinates for checking attendance, and the maximum allowed distance for employees to check in.' })}
           </p>
           
           <div className="space-y-4">
             <div>
-              <label htmlFor="latitude" className="block text-sm font-medium text-gray-700">Latitude</label>
+              <label htmlFor="latitude" className="block text-sm font-medium text-gray-700">{t('Latitude')}</label>
               <input
                 type="number"
                 step="any"
@@ -114,7 +116,7 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
             </div>
 
             <div>
-              <label htmlFor="longitude" className="block text-sm font-medium text-gray-700">Longitude</label>
+              <label htmlFor="longitude" className="block text-sm font-medium text-gray-700">{t('Longitude')}</label>
               <input
                 type="number"
                 step="any"
@@ -127,7 +129,7 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
             </div>
 
             <div>
-              <label htmlFor="maxDistance" className="block text-sm font-medium text-gray-700">Max Distance (Meters)</label>
+              <label htmlFor="maxDistance" className="block text-sm font-medium text-gray-700">{t('Max Distance (Meters)', { defaultValue: 'Max Distance (Meters)' })}</label>
               <input
                 type="number"
                 id="maxDistance"
@@ -145,8 +147,8 @@ export default function AdminSettings({ token }: AdminSettingsProps) {
             type="submit"
             className="inline-flex justify-center flex-start items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none"
           >
-            <Save className="w-4 h-4 mr-2" />
-            Save Settings
+            <Save className="w-4 h-4 ltr:mr-2 rtl:ml-2" />
+            {t('Save Settings')}
           </button>
         </div>
       </form>
